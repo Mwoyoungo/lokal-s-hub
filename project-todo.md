@@ -1,6 +1,6 @@
 # LOKAL-S Hub Project TODO
 
-_Last updated: 2025-04-27 16:14_
+_Last updated: 2025-04-27 17:48_
 
 This file tracks detailed tasks and implementation progress for the LOKAL-S Hub project.
 
@@ -80,6 +80,8 @@ This file tracks detailed tasks and implementation progress for the LOKAL-S Hub 
 ### Next Tasks
 
 - [x] Set up GitHub repository and push project (initialized local Git repo)
+- [x] Deploy application to Vercel with proper environment variables
+- [x] Fix service request creation schema mismatch (removed address field)
 - [ ] Build developer earnings page
 
 ## Technical Debt

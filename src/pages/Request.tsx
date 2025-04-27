@@ -182,7 +182,6 @@ const Request: React.FC = () => {
           description, 
           budget: parseFloat(budget), 
           location: `POINT(${coords.lng} ${coords.lat})`, 
-          address: address, // Include the address in the request
           status: 'pending' 
         }])
         .select()
