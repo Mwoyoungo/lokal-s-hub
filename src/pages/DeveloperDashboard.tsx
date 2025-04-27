@@ -32,9 +32,11 @@ interface RequestItem {
 
 const DeveloperDashboard = () => {
   const [requests, setRequests] = useState<RequestItem[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<RequestItem[]>([]);
+  const [assignedRequests, setAssignedRequests] = useState<RequestItem[]>([]);
   const [activeRequests, setActiveRequests] = useState<RequestItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('new');
+  const [activeTab, setActiveTab] = useState('assigned');
   const [available, setAvailable] = useState(false); // Default to false until we get the actual status
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
@@ -115,6 +117,7 @@ const DeveloperDashboard = () => {
         
         // Filter and categorize requests
         const pendingItems: RequestItem[] = [];
+        const assignedItems: RequestItem[] = [];
         const activeItems: RequestItem[] = [];
         
         allRequestsData.forEach((r: any) => {
@@ -146,9 +149,9 @@ const DeveloperDashboard = () => {
             // All pending requests go to the pending list
             pendingItems.push(requestItem);
           } else if (normalizedStatus === 'assigned' && r.matched_developer_id === userId) {
-            // Only assigned requests for this developer go to pending list
+            // Only assigned requests for this developer go to assigned list
             console.log(`  -> Assigned to this developer`);
-            pendingItems.push(requestItem);
+            assignedItems.push(requestItem);
           } else if ((normalizedStatus === 'accepted' || normalizedStatus === 'in_progress') && r.matched_developer_id === userId) {
             // Active requests for this developer
             console.log(`  -> Active job for this developer`);
@@ -157,7 +160,9 @@ const DeveloperDashboard = () => {
         });
         
         // Update state with categorized requests
-        setRequests(pendingItems);
+        setPendingRequests(pendingItems);
+        setAssignedRequests(assignedItems);
+        setRequests([...pendingItems, ...assignedItems]); // Keep backward compatibility
         setActiveRequests(activeItems);
       }
       
@@ -364,10 +369,11 @@ const DeveloperDashboard = () => {
           icon: <Check className="h-5 w-5 text-green-500" />
         });
         
-        // Move request from new to active
-        const acceptedRequest = requests.find(r => r.id === id);
-        if (acceptedRequest) {
-          const updatedRequest = {...acceptedRequest, status: 'accepted'};
+        // Move from assignedRequests to activeRequests
+        const requestToMove = assignedRequests.find(r => r.id === id);
+        if (requestToMove) {
+          const updatedRequest = {...requestToMove, status: 'accepted'};
+          setAssignedRequests(prev => prev.filter(r => r.id !== id));
           setActiveRequests(prev => [updatedRequest, ...prev]);
         }
       } else if (newStatus === 'in_progress') {
@@ -376,7 +382,7 @@ const DeveloperDashboard = () => {
           icon: <Check className="h-5 w-5 text-green-500" />
         });
         
-        // Update the status in the active requests list
+        // Just update the status - request should already be in activeRequests
         setActiveRequests(prev => prev.map(r => 
           r.id === id ? {...r, status: 'in_progress'} : r
         ));
@@ -385,21 +391,21 @@ const DeveloperDashboard = () => {
           description: 'You will not be assigned to this request',
           icon: <X className="h-5 w-5 text-red-500" />
         });
+        
+        // Remove from assignedRequests
+        setAssignedRequests(prev => prev.filter(r => r.id !== id));
       } else if (newStatus === 'completed') {
         toast.success('Request marked as completed!', {
           description: 'Great job! The client will be notified.',
           icon: <Check className="h-5 w-5 text-green-500" />
         });
-      }
-      
-      // Remove from appropriate list
-      if (newStatus === 'accepted' || newStatus === 'in_progress') {
-        setRequests(prev => prev.filter(r => r.id !== id));
-      } else if (newStatus === 'rejected') {
-        setRequests(prev => prev.filter(r => r.id !== id));
-      } else if (newStatus === 'completed') {
+        
+        // Remove from activeRequests
         setActiveRequests(prev => prev.filter(r => r.id !== id));
       }
+      
+      // For backward compatibility, also remove from the requests list
+      setRequests(prev => prev.filter(r => r.id !== id));
     }
   };
 
@@ -723,16 +729,21 @@ const DeveloperDashboard = () => {
           className="w-full"
         >
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-            <TabsList className="w-full sm:w-auto bg-white border-4 border-black p-1 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
+            <TabsList className="w-full sm:w-auto bg-white border-4 border-black p-1 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]" style={{ minWidth: '500px' }}>
+              <TabsTrigger 
+                value="assigned" 
+                className="data-[state=active]:bg-yellow-500 data-[state=active]:text-black font-bold text-lg py-2 px-4">
+                Assigned {assignedRequests.length > 0 && `(${assignedRequests.length})`}
+              </TabsTrigger>
               <TabsTrigger 
                 value="new" 
                 className="data-[state=active]:bg-black data-[state=active]:text-white font-bold text-lg py-2 px-4">
-                New Requests {requests.length > 0 && `(${requests.length})`}
+                New {pendingRequests.length > 0 && `(${pendingRequests.length})`}
               </TabsTrigger>
               <TabsTrigger 
                 value="active" 
-                className="data-[state=active]:bg-black data-[state=active]:text-white font-bold text-lg py-2 px-4">
-                Active Jobs {activeRequests.length > 0 && `(${activeRequests.length})`}
+                className="data-[state=active]:bg-green-500 data-[state=active]:text-black font-bold text-lg py-2 px-4">
+                Active {activeRequests.length > 0 && `(${activeRequests.length})`}
               </TabsTrigger>
             </TabsList>
             
@@ -742,15 +753,79 @@ const DeveloperDashboard = () => {
             </Button>
           </div>
           
+          <TabsContent value="assigned">
+            {assignedRequests.length === 0 ? (
+              <Card className="bg-white border-4 border-dashed border-black p-8 text-center shadow-[4px_4px_0px_0px_rgba(0,0,0,0.7)]">
+                <p className="font-bold text-xl">No assigned requests</p>
+                <p className="font-medium mt-2">You will see requests that clients have assigned to you here</p>
+              </Card>
+            ) : (
+              <div className="grid gap-6">
+                {assignedRequests.map(request => (
+                  <Card key={request.id} className="bg-yellow-50 border-4 border-black overflow-hidden shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] hover:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] hover:translate-y-[-2px] hover:translate-x-[-2px] transition-all">
+                    <div className="p-4 border-b-4 border-black bg-yellow-400">
+                      <div className="flex justify-between items-center">
+                        <h3 className="font-black text-lg tracking-tight">{request.service_type}</h3>
+                        <Badge className="bg-black text-white font-bold px-3 py-1 text-sm">
+                          ${request.budget}
+                        </Badge>
+                      </div>
+                    </div>
+                    
+                    <div className="p-4">
+                      <p className="font-medium mb-4">{request.description}</p>
+                      
+                      <div className="grid grid-cols-2 gap-4 mb-4">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 bg-blue-300 border-2 border-black flex items-center justify-center">
+                            <User size={16} className="text-black" />
+                          </div>
+                          <span className="font-bold text-sm">{request.client.first_name} {request.client.last_name}</span>
+                        </div>
+                        
+                        <div className="flex items-center gap-2 text-sm font-medium">
+                          <div className="w-8 h-8 bg-purple-300 border-2 border-black flex items-center justify-center">
+                            <Clock size={16} className="text-black" />
+                          </div>
+                          <span>{formatDate(request.created_at)}</span>
+                        </div>
+                      </div>
+                      
+                      <div className="flex gap-3 mt-4 pt-4 border-t-2 border-gray-200">
+                        <Badge className={`px-3 py-1 text-black font-bold border-2 border-black bg-yellow-200`}>
+                          Assigned to You
+                        </Badge>
+
+                        <Button 
+                          onClick={() => handleAction(request.id, 'accepted')}
+                          className="flex-1 bg-green-500 hover:bg-green-600 text-black font-bold border-3 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.7)] hover:shadow-[5px_5px_0px_0px_rgba(0,0,0,0.7)] hover:translate-y-[-2px] hover:translate-x-[-2px] transition-all"
+                        >
+                          <Check size={18} className="mr-2" /> Accept Job
+                        </Button>
+                        <Button 
+                          onClick={() => handleAction(request.id, 'rejected')}
+                          variant="outline"
+                          className="flex-1 bg-white hover:bg-gray-100 text-black font-bold border-3 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.7)] hover:shadow-[5px_5px_0px_0px_rgba(0,0,0,0.7)] hover:translate-y-[-2px] hover:translate-x-[-2px] transition-all"
+                        >
+                          <X size={18} className="mr-2" /> Reject
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+          
           <TabsContent value="new">
-            {requests.length === 0 ? (
+            {pendingRequests.length === 0 ? (
               <Card className="bg-white border-4 border-dashed border-black p-8 text-center shadow-[4px_4px_0px_0px_rgba(0,0,0,0.7)]">
                 <p className="font-bold text-xl">No new requests available</p>
                 <p className="font-medium mt-2">Check back later for new service requests</p>
               </Card>
             ) : (
               <div className="grid gap-6">
-                {requests.map(request => renderTaskCard(request, false))}
+                {pendingRequests.map(request => renderTaskCard(request, false))}
               </div>
             )}
           </TabsContent>
