@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { GoogleMap, useLoadScript, MarkerF, InfoWindowF, OverlayView, Autocomplete } from '@react-google-maps/api';
+import { GoogleMap, useLoadScript, MarkerF, InfoWindowF, OverlayView, Autocomplete, Libraries } from '@react-google-maps/api';
 import { MapPin, Star } from 'lucide-react';
 
 const mapContainerStyle = {
@@ -12,6 +12,9 @@ const defaultCenter = {
   lat: 40.712,
   lng: -74.006
 };
+
+// Define libraries as a constant to prevent recreation on each render
+const libraries: Libraries = ['places'];
 
 interface Developer {
   id: string;
@@ -99,7 +102,7 @@ const Map: React.FC<MapProps> = ({
 
   const { isLoaded, loadError } = useLoadScript({
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_KEY || "",
-    libraries: ['places']
+    libraries: libraries
   });
 
   // Handle when a place is selected from the autocomplete dropdown
@@ -290,13 +293,23 @@ const Map: React.FC<MapProps> = ({
           )}
           
           {/* Developer markers */}
+          {developers.length === 0 && (
+            <div className="absolute top-20 left-4 z-10 bg-black text-white px-4 py-2 rounded-lg border-2 border-red-400 shadow-[3px_3px_0px_0px_rgba(0,0,0,0.7)]"
+                style={{pointerEvents: 'none'}}>
+              <p className="text-sm font-bold">No available developers found</p>
+            </div>
+          )}
+          
           {developers.map(developer => {
+            // Log developers for debugging
+            console.log(`Rendering developer: ${developer.id} at position:`, developer.lat, developer.lng);
+            
             const developerName = developer.name || `${developer.first_name || ''} ${developer.last_name || ''}`.trim();
             const position = { lat: developer.lat, lng: developer.lng };
             const isSelected = selectedDeveloper?.id === developer.id;
             
             return (
-              <React.Fragment key={developer.id}>
+              <div key={developer.id} className="developer-marker-container">
                 <div
                   className="absolute transform -translate-x-1/2 -translate-y-1/2 z-50"
                   style={{ 
@@ -318,7 +331,7 @@ const Map: React.FC<MapProps> = ({
                   />
                 </div>
                 
-                {/* Custom developer marker with neobrutalist design */}
+                {/* Custom developer marker with exact styling from screenshot */}
                 <MarkerF
                   position={position}
                   onClick={() => {
@@ -330,29 +343,31 @@ const Map: React.FC<MapProps> = ({
                     scaledSize: new google.maps.Size(1, 1)
                   }}
                 >
-                  {/* Custom overlay for developer marker styled like the Facebook image */}
+                  {/* Custom overlay for developer marker styled exactly like the screenshot */}
                   <OverlayView 
                     position={position}
-                    mapPaneName={OverlayView.FLOAT_PANE}
+                    mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
                   >
-                    <div className="flex flex-col items-center">
-                      <div className="bg-black text-white font-bold px-3 py-1.5 rounded-lg shadow-[3px_3px_0px_0px_rgba(0,0,0,0.7)] text-sm z-10">
+                    <div className="flex flex-col items-center pointer-events-auto cursor-pointer" 
+                         onClick={() => {
+                           setSelectedDeveloper(developer);
+                           if (onDeveloperSelect) onDeveloperSelect(developer);
+                         }}>
+                      {/* Black name label */}
+                      <div className="bg-black text-white text-xs font-bold px-2 py-1 rounded-sm z-10">
                         {developerName}
                       </div>
-                      {/* Custom pin styled more like the Facebook image */}
-                      <div className="relative -mt-1.5">
-                        <div className="w-7 h-7 rounded-full bg-[#FFD700] border-2 border-black shadow-md relative">
-                          {/* Inner circle */}
-                          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-black"></div>
+                      
+                      {/* Yellow pin marker exactly as in screenshot */}
+                      <div className="flex flex-col items-center -mt-1">
+                        {/* Yellow circle with black border */}
+                        <div className="w-7 h-7 rounded-full bg-yellow-400 border-[3px] border-black relative flex items-center justify-center">
+                          {/* Black center dot */}
+                          <div className="w-2 h-2 rounded-full bg-black"></div>
                         </div>
-                        {/* Pin triangle */}
-                        <div className="absolute -bottom-3 left-1/2 transform -translate-x-1/2 w-4 h-4"
-                          style={{
-                            borderLeft: '5px solid transparent',
-                            borderRight: '5px solid transparent',
-                            borderTop: '8px solid black'
-                          }}
-                        ></div>
+                        
+                        {/* Pin triangle pointing down */}
+                        <div className="w-0 h-0 border-l-[8px] border-l-transparent border-r-[8px] border-r-transparent border-t-[10px] border-t-black -mt-[2px]"></div>
                       </div>
                     </div>
                   </OverlayView>
@@ -378,9 +393,22 @@ const Map: React.FC<MapProps> = ({
                     </div>
                   </InfoWindowF>
                 )}
-              </React.Fragment>
+              </div>
             );
           })}
+          
+          {/* Enhanced info when no developers are available, but we have at least set up the map */}
+          {userLocation && developers.length === 0 && (
+            <OverlayView 
+              position={userLocation}
+              mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
+            >
+              <div className="bg-black text-white px-3 py-1.5 rounded-lg shadow-[3px_3px_0px_0px_rgba(0,0,0,0.7)] text-sm z-10">
+                <p>No developers available right now</p>
+                <p className="text-xs">Check back later!</p>
+              </div>
+            </OverlayView>
+          )}
         </GoogleMap>
       </div>
       <div className="absolute inset-0 pointer-events-none bg-gradient-to-b from-transparent to-background/10 rounded-lg" />

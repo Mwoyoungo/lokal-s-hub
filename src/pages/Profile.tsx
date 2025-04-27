@@ -11,14 +11,32 @@ const Profile = () => {
   const userProfile = JSON.parse(localStorage.getItem('userProfile') || '{}');
 
   const handleLogout = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) {
-      toast.error(error.message);
-      return;
+    try {
+      // Try local sign out (not global) to avoid 403 Forbidden errors
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
+      
+      // Continue with clean up even if there's an API error
+      if (error) {
+        console.error('Error during logout API call:', error);
+        toast.warning('Continuing with local logout...');
+      } else {
+        toast.success('Logged out successfully');
+      }
+      
+      // Clear all necessary local storage items
+      localStorage.removeItem('userProfile');
+      localStorage.removeItem('supabase.auth.token');
+      localStorage.removeItem('userLocation');
+      
+      // Redirect to login page
+      navigate('/login');
+    } catch (err) {
+      console.error('Unexpected error during logout:', err);
+      toast.error('Logout process encountered an error');
+      
+      // Force redirect as fallback
+      navigate('/login');
     }
-    localStorage.removeItem('userProfile');
-    toast.success('Logged out');
-    navigate('/login');
   };
 
   return (

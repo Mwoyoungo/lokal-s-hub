@@ -220,8 +220,8 @@ const Request: React.FC = () => {
         });
       }
       
-      // Navigate to request details page
-      navigate(`/request/${data.id}`);
+      // Navigate to developer selection page with the request ID
+      navigate('/select-developer', { state: { requestId: data.id } });
     } catch (error: any) {
       console.error('Error creating service request:', error);
       toast.error(`Error creating request: ${error.message}`);

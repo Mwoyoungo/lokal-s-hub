@@ -21,6 +21,8 @@ import DeveloperProfile from "./pages/DeveloperProfile";
 import DeveloperOnboarding from "./pages/DeveloperOnboarding";
 import DeveloperDashboard from "./pages/DeveloperDashboard";
 import DeveloperSettings from "./pages/DeveloperSettings";
+import DeveloperSelection from "./pages/DeveloperSelection";
+import ServiceDetails from "./pages/ServiceDetails";
 import ProtectedRoute from "@/components/ProtectedRoute";
 
 const queryClient = new QueryClient();
@@ -43,6 +45,8 @@ const App = () => (
           <Route path="/provider-dashboard" element={<ProtectedRoute><ProviderDashboard /></ProtectedRoute>} />
           <Route path="/request" element={<ProtectedRoute><Request /></ProtectedRoute>} />
           <Route path="/request/:id" element={<ProtectedRoute><RequestDetails /></ProtectedRoute>} />
+          <Route path="/select-developer" element={<ProtectedRoute><DeveloperSelection /></ProtectedRoute>} />
+          <Route path="/service/:id" element={<ProtectedRoute><ServiceDetails /></ProtectedRoute>} />
           <Route path="/developers" element={<ProtectedRoute><Developers /></ProtectedRoute>} />
           <Route path="/developers/:id" element={<ProtectedRoute><DeveloperProfile /></ProtectedRoute>} />
           <Route path="/developer-onboarding" element={<ProtectedRoute><DeveloperOnboarding /></ProtectedRoute>} />

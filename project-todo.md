@@ -1,6 +1,6 @@
 # LOKAL-S Hub Project TODO
 
-_Last updated: 2025-04-27_
+_Last updated: 2025-04-27 07:20_
 
 This file tracks detailed tasks and implementation progress for the LOKAL-S Hub project.
 
@@ -45,12 +45,42 @@ This file tracks detailed tasks and implementation progress for the LOKAL-S Hub 
 - [x] Add browser notification support with distance information
 - [x] Connect availability toggle to database for accurate matching
 - [x] Add manual location entry option for developers and clients (with map selection)
+- [x] Update map to show only available developers instead of using proximity-based filtering
+- [ ] (Pending Testing) Implement enhanced developer location management in Developer Dashboard
+- [ ] (Pending Testing) Fix dynamic developer markers display with proper styling on client map
+- [ ] (Pending Testing) Implement real-time developer location updates across application
+
+### Developer Selection and Chat Implementation
+
+- [ ] Create Developer Selection Page
+  - [ ] Design developer cards with skills, ratings, and hourly rates
+  - [ ] Implement developer filtering options (by rating, proximity, specialty)
+  - [ ] Add an 'Assign' button for clients to select a specific developer
+  - [ ] Implement neobrutalist styling matching existing design
+
+- [ ] Update Service Request Flow
+  - [ ] Modify service request creation to redirect to developer selection page
+  - [ ] Implement service request assignment to specific developer
+  - [ ] Add new status tracking (pending, assigned, accepted, in_progress)
+  - [ ] Update Supabase database functions for the new workflow
+
+- [ ] Implement Chat Feature
+  - [ ] Create chat UI components (message bubbles, input field, emoji support)
+  - [ ] Set up real-time messaging using Supabase subscriptions
+  - [ ] Implement message persistence and history loading
+  - [ ] Add typing indicators and read receipts
+  - [ ] Style chat interface with neobrutalist design
+
+- [ ] Enhance Notification System
+  - [ ] Add notifications for new assignments
+  - [ ] Create alerts for request status changes
+  - [ ] Implement unread message indicators
+  - [ ] Add sound notifications for new messages
 
 ### Next Tasks
 
-- [x] Set up GitHub repository and push project
+- [ ] Set up GitHub repository and push project (initialized local Git repo)
 - [ ] Build developer earnings page
-- [ ] Implement messaging system
 
 ## Technical Debt
 
@@ -67,6 +97,9 @@ This file tracks detailed tasks and implementation progress for the LOKAL-S Hub 
 - [x] Test the "Mark Complete" functionality for active jobs
 - [x] Verify that the availability toggle works correctly
 - [ ] Test real-time updates when a new request is created
+- [ ] Test manual location setting in Developer Dashboard
+- [ ] Verify that developers appear correctly on map with yellow pin markers and black labels
+- [ ] Verify real-time updates when developers change their location or availability
 
 ## Notes
 

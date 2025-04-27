@@ -28,6 +28,13 @@ _Last updated: 2025-04-27_
 - ✅ Request appears on Developer Dashboard
 - ✅ Real-time updates using Supabase subscriptions
 
+## Recent Updates
+
+1. **Available Developer Filtering**
+   - ✅ Modified Home component to only show developers who are available (availability_status is true)
+   - ✅ Added visual indicator showing the number of available developers on the map
+   - ✅ Removed proximity-based filtering in favor of availability-based filtering
+
 ## Next Steps
 
 1. **Real-time Service Matching**

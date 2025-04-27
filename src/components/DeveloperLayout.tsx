@@ -31,28 +31,35 @@ const DeveloperLayout: React.FC<DeveloperLayoutProps> = ({ children }) => {
 
   const handleLogout = async () => {
     try {
-      // Clear local session first
-      localStorage.removeItem('supabase.auth.token');
-      
-      // Attempt to sign out from Supabase
-      const { error } = await supabase.auth.signOut();
-      
-      if (error) {
-        console.error('Error during logout:', error);
-        // Continue with local logout even if API call fails
+      // Ensure we're actually logged in first
+      const { data } = await supabase.auth.getSession();
+      if (!data?.session?.user) {
+        navigate('/login');
+        return;
       }
+
+      // Try local sign out (not global) to avoid 403 Forbidden errors
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
       
-      // Show success message and redirect regardless
-      toast.success('Logged out successfully');
-      
-      // Force redirect to login page
+      // Continue with clean up even if there's an API error
+      if (error) {
+        console.error('Error during logout API call:', error);
+        toast.warning('Continuing with local logout...');
+      } else {
+        toast.success('Logged out successfully');
+      }
+
+      // Clear all necessary local storage items
+      localStorage.removeItem('userProfile');
+      localStorage.removeItem('supabase.auth.token');
+      localStorage.removeItem('userLocation');
+
+      // Redirect to login
       navigate('/login');
     } catch (error) {
       console.error('Logout failed:', error);
-      toast.error('Logout failed. Please try again.');
-      
-      // Force redirect to login page anyway
-      navigate('/login');
+      toast.error('Logout failed, but redirecting to login page.');
+      navigate('/login'); // Force redirect as fallback
     }
   };
 

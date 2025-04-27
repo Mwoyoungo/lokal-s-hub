@@ -8,11 +8,12 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { BarChart3, Bell, Calendar, Check, ChevronRight, Clock, Loader2, MoreHorizontal, Plus, User, X } from 'lucide-react';
+import { BarChart3, Bell, Calendar, Check, ChevronRight, Clock, Loader2, MapPin, MoreHorizontal, Plus, User, X } from 'lucide-react';
 import DeveloperLayout from '@/components/DeveloperLayout';
 import { cn } from '@/lib/utils';
 import { playNotificationSound, requestNotificationPermission, showBrowserNotification } from '@/utils/notificationSound';
 import { updateUserLocation } from '@/utils/locationUtils';
+import LocationPicker from '@/components/LocationPicker';
 
 interface RequestItem {
   id: string;
@@ -32,9 +33,11 @@ const DeveloperDashboard: React.FC = () => {
   const [activeRequests, setActiveRequests] = useState<RequestItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('new');
-  const [available, setAvailable] = useState(true);
+  const [available, setAvailable] = useState(false); // Default to false until we get the actual status
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
+  const [showLocationPicker, setShowLocationPicker] = useState(false);
+  const [currentLocation, setCurrentLocation] = useState<{lat: number, lng: number} | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const navigate = useNavigate();
 
@@ -61,6 +64,20 @@ const DeveloperDashboard: React.FC = () => {
       }
       
       setUserId(currentUserId);
+      
+      // Fetch developer's current availability status
+      const { data: profileData, error: profileError } = await supabase
+        .from('developer_profiles')
+        .select('availability_status')
+        .eq('user_id', currentUserId)
+        .single();
+      
+      if (profileError) {
+        console.error('Error fetching developer profile:', profileError);
+      } else if (profileData) {
+        console.log('Developer availability status:', profileData.availability_status);
+        setAvailable(Boolean(profileData.availability_status));
+      }
       
       // Update developer location
       updateUserLocation(currentUserId).then(success => {
@@ -245,6 +262,13 @@ const DeveloperDashboard: React.FC = () => {
         throw error;
       }
       
+      // Dispatch a custom event for real-time communication across the app
+      window.dispatchEvent(
+        new CustomEvent('developerAvailabilityChanged', { 
+          detail: { userId, status: newStatus } 
+        })
+      );
+      
       toast.success(`You are now ${newStatus ? 'available' : 'unavailable'} for new requests`, {
         icon: newStatus ? <Check className="text-green-500" /> : <X className="text-red-500" />,
         duration: 3000
@@ -399,8 +423,85 @@ const DeveloperDashboard: React.FC = () => {
     );
   }
 
+  // Handle location picker open/close
+  const toggleLocationPicker = () => setShowLocationPicker(!showLocationPicker);
+  
+  // Handle location save
+  const handleLocationSaved = async (location: {lat: number, lng: number}, address: string) => {
+    if (!userId) return;
+    
+    try {
+      setCurrentLocation(location);
+      
+      // Format for PostGIS
+      const point = `POINT(${location.lng} ${location.lat})`;
+      
+      // Save to database
+      const { error } = await supabase
+        .from('users')
+        .update({ 
+          location: point,
+          address: address
+        })
+        .eq('id', userId);
+        
+      if (error) throw error;
+      
+      toast.success('Location updated successfully');
+      
+      // Notify other components about location change
+      window.dispatchEvent(
+        new CustomEvent('developerLocationChanged', { 
+          detail: { userId, location, address } 
+        })
+      );
+      
+      // Close the location picker
+      setShowLocationPicker(false);
+    } catch (error: any) {
+      console.error('Error saving location:', error);
+      toast.error('Failed to update location');
+    }
+  };
+
+  // Location modal
+  const LocationModal = () => {
+    if (!showLocationPicker) return null;
+    
+    return (
+      <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+        <div className="w-full max-w-3xl max-h-[90vh] flex flex-col bg-white border-4 border-black shadow-[8px_8px_0px_rgba(0,0,0,0.7)] rounded-xl overflow-hidden">
+          <div className="bg-black p-3 flex items-center justify-between text-white">
+            <div className="flex items-center gap-2">
+              <MapPin className="h-5 w-5" />
+              <h2 className="text-xl font-bold">Set Your Location</h2>
+            </div>
+            <Button variant="ghost" className="h-8 w-8 p-0 text-white" onClick={toggleLocationPicker}>
+              <X className="h-5 w-5" />
+            </Button>
+          </div>
+          
+          <div className="flex-grow overflow-hidden">
+            {userId && (
+              <LocationPicker 
+                userId={userId}
+                onLocationSaved={handleLocationSaved}
+                autoSave={false}
+                buttonText="Save My Location"
+                showHeader={false}
+              />
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <DeveloperLayout>
+      {/* Location picker modal */}
+      <LocationModal />
+      
       <div className="min-h-screen bg-[#FFD700] p-6">
         {/* Header with status toggle */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
@@ -419,9 +520,9 @@ const DeveloperDashboard: React.FC = () => {
             />
           </div>
         </div>
-
-        {/* Stats cards row */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+        
+        {/* Stats cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <Card className="bg-white border-4 border-black p-5 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] hover:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] hover:translate-y-[-2px] hover:translate-x-[-2px] transition-all">
             <div className="flex items-center justify-between">
               <div>
@@ -441,16 +542,16 @@ const DeveloperDashboard: React.FC = () => {
           <Card className="bg-white border-4 border-black p-5 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] hover:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] hover:translate-y-[-2px] hover:translate-x-[-2px] transition-all">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-base font-bold">Active Jobs</p>
-                <h3 className="text-4xl font-black tracking-tight mt-1">{activeRequests.length}</h3>
+                <p className="text-base font-bold">Your Location</p>
+                <h3 className="text-4xl font-black tracking-tight mt-1">{currentLocation ? 'Set' : 'Not Set'}</h3>
               </div>
-              <div className="w-16 h-16 bg-blue-400 border-3 border-black flex items-center justify-center">
-                <Clock className="w-8 h-8 text-black" />
+              <div className="w-16 h-16 bg-yellow-400 border-3 border-black flex items-center justify-center">
+                <MapPin className="w-8 h-8 text-black" />
               </div>
             </div>
-            <div className="mt-4 text-base flex items-center text-blue-700 font-bold">
+            <div className="mt-4 text-base flex items-center text-blue-700 font-bold cursor-pointer" onClick={toggleLocationPicker}>
               <ChevronRight className="w-5 h-5" />
-              <span>View all jobs</span>
+              <span>Set your location manually</span>
             </div>
           </Card>
           
