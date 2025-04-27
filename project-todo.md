@@ -52,17 +52,18 @@ This file tracks detailed tasks and implementation progress for the LOKAL-S Hub 
 
 ### Developer Selection and Chat Implementation
 
-- [ ] Create Developer Selection Page
-  - [ ] Design developer cards with skills, ratings, and hourly rates
-  - [ ] Implement developer filtering options (by rating, proximity, specialty)
-  - [ ] Add an 'Assign' button for clients to select a specific developer
-  - [ ] Implement neobrutalist styling matching existing design
+- [x] Create Developer Selection Page
+  - [x] Design developer cards with ratings and hourly rates
+  - [x] Simplify developer filtering to only show available developers
+  - [x] Add an 'Assign' button for clients to select a specific developer
+  - [x] Implement neobrutalist styling matching existing design
 
-- [ ] Update Service Request Flow
-  - [ ] Modify service request creation to redirect to developer selection page
-  - [ ] Implement service request assignment to specific developer
-  - [ ] Add new status tracking (pending, assigned, accepted, in_progress)
-  - [ ] Update Supabase database functions for the new workflow
+- [x] Update Service Request Flow
+  - [x] Modify service request creation to redirect to developer selection page
+  - [x] Implement service request assignment to specific developer
+  - [x] Add new status tracking (pending, assigned)
+  - [x] Implement status tracking for (accepted, in_progress)
+  - [x] Update Supabase database functions for the new workflow
 
 - [ ] Implement Chat Feature
   - [ ] Create chat UI components (message bubbles, input field, emoji support)

@@ -4,13 +4,22 @@ import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Star, MapPin, Filter, X, ArrowUpDown, Check } from 'lucide-react';
-import { Developer } from '@/utils/developerUtils';
+import { Star, MapPin } from 'lucide-react';
 
 interface DeveloperSelectionProps {
   requestId?: string;
+}
+
+interface Developer {
+  id: string;
+  first_name: string;
+  last_name: string;
+  profile_image_url?: string;
+  address?: string;
+  hourly_rate: number;
+  average_rating: number;
+  bio?: string;
+  distance_km?: number;
 }
 
 const DeveloperSelection: React.FC<DeveloperSelectionProps> = ({ requestId }) => {
@@ -22,14 +31,8 @@ const DeveloperSelection: React.FC<DeveloperSelectionProps> = ({ requestId }) =>
   console.log('Developer Selection Page - Request ID:', serviceRequestId, 'Location State:', location.state);
   
   const [developers, setDevelopers] = useState<Developer[]>([]);
-  const [filteredDevelopers, setFilteredDevelopers] = useState<Developer[]>([]);
   const [loading, setLoading] = useState(true);
-  const [sortBy, setSortBy] = useState<'rating' | 'distance' | 'price'>('distance');
   const [serviceDetails, setServiceDetails] = useState<any>(null);
-  const [showFilters, setShowFilters] = useState(false);
-  const [filterMinRating, setFilterMinRating] = useState(0);
-  const [filterMaxDistance, setFilterMaxDistance] = useState(50);
-  const [filterMaxPrice, setFilterMaxPrice] = useState(200);
   
   useEffect(() => {
     // Log information about navigation and request ID
@@ -67,8 +70,10 @@ const DeveloperSelection: React.FC<DeveloperSelectionProps> = ({ requestId }) =>
   const fetchAvailableDevelopers = async () => {
     try {
       setLoading(true);
+      console.log('Fetching available developers...');
       
       // Get developers from users table with availability status from developer_profiles
+      // Simplified query to only filter by availability status - removed skills relationship
       const { data, error } = await supabase
         .from('users')
         .select(`
@@ -77,132 +82,133 @@ const DeveloperSelection: React.FC<DeveloperSelectionProps> = ({ requestId }) =>
           last_name,
           profile_image_url,
           location,
-          address,
-          developer_profiles(hourly_rate, average_rating, availability_status, bio),
-          developer_skills(skills(name, category))
+          developer_profiles(hourly_rate, average_rating, availability_status, bio)
         `)
         .eq('user_type', 'developer')
         .eq('developer_profiles.availability_status', true);
       
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase query error:', error);
+        throw new Error(`Database query failed: ${error.message}`);
+      }
       
       if (!data || data.length === 0) {
+        console.log('No available developers found');
         setDevelopers([]);
-        setFilteredDevelopers([]);
         setLoading(false);
         return;
       }
       
-      // Process developer data
+      console.log('Found developers:', data.length);
+      
+      // Process developer data with careful validation
       const processedDevelopers = data.map(dev => {
-        const profile = dev.developer_profiles[0] || {};
+        // Validate developer profile data exists and use proper type assertion
+        const profiles = Array.isArray(dev.developer_profiles) ? dev.developer_profiles : [];
+        // Explicitly type the profile to avoid TypeScript errors
+        const profile: { bio?: string; average_rating?: number; hourly_rate?: number } = 
+          profiles.length > 0 ? (profiles[0] || {}) : {};
         
-        // Extract coordinates from PostGIS point format
+        // Extract coordinates from PostGIS point format with validation
         let lat = 0;
         let lng = 0;
         
-        if (dev.location) {
-          const pointMatch = dev.location.match(/POINT\(([^\)]+)\)/);
-          if (pointMatch && pointMatch[1]) {
-            const coords = pointMatch[1].split(' ');
-            lng = parseFloat(coords[0]);
-            lat = parseFloat(coords[1]);
+        if (typeof dev.location === 'string') {
+          try {
+            // Try to parse the PostGIS point format (POINT(lng lat))
+            const pointMatch = dev.location.match(/POINT\(([\d.-]+) ([\d.-]+)\)/);
+            if (pointMatch && pointMatch.length === 3) {
+              lng = parseFloat(pointMatch[1]);
+              lat = parseFloat(pointMatch[2]);
+            }
+          } catch (err) {
+            console.error('Error parsing location coordinates:', err);
+            // Continue with default coordinates (0,0)
           }
         }
         
-        // Extract skills
-        const skills = dev.developer_skills?.map(skill => skill.skills?.name || '') || [];
+        // No skills processing needed - focusing only on availability status
         
+        // Create developer object with safe defaults - removed skills
         return {
-          id: dev.id,
-          first_name: dev.first_name || 'Developer',
+          id: dev.id || '',
+          first_name: dev.first_name || '',
           last_name: dev.last_name || '',
-          lat,
-          lng,
-          address: dev.address || '',
-          profile_image_url: dev.profile_image_url,
-          bio: profile?.bio || '',
-          average_rating: profile?.average_rating || 0,
-          hourly_rate: profile?.hourly_rate || 0,
-          available: true,
-          skills: skills as string[]
+          profile_image_url: dev.profile_image_url || '',
+          address: 'Location not available', // Address removed from query since it doesn't exist in users table
+          hourly_rate: profile.hourly_rate || 0,
+          average_rating: profile.average_rating || 0,
+          bio: profile.bio || 'No bio available',
+          distance_km: null
         };
       });
       
       setDevelopers(processedDevelopers);
-      applyFilters(processedDevelopers);
+      setLoading(false);
     } catch (error) {
       console.error('Error fetching developers:', error);
-      toast.error('Failed to load available developers');
-    } finally {
+      toast.error(`Error fetching developers: ${error instanceof Error ? error.message : 'Unknown error'}`);
       setLoading(false);
     }
-  };
-  
-  // Apply filters and sorting to developers
-  const applyFilters = (devs = developers) => {
-    let filtered = [...devs];
-    
-    // Apply rating filter
-    filtered = filtered.filter(dev => dev.average_rating >= filterMinRating);
-    
-    // Apply distance filter if we have location data
-    if (filterMaxDistance < 50) {
-      filtered = filtered.filter(dev => {
-        return dev.distance_km ? dev.distance_km <= filterMaxDistance : true;
-      });
-    }
-    
-    // Apply price filter
-    filtered = filtered.filter(dev => dev.hourly_rate <= filterMaxPrice);
-    
-    // Apply sorting
-    filtered.sort((a, b) => {
-      if (sortBy === 'rating') return b.average_rating - a.average_rating;
-      if (sortBy === 'price') return a.hourly_rate - b.hourly_rate;
-      // Default is distance
-      return (a.distance_km || 999) - (b.distance_km || 999);
-    });
-    
-    setFilteredDevelopers(filtered);
-  };
-  
-  // Reset filters to default
-  const resetFilters = () => {
-    setFilterMinRating(0);
-    setFilterMaxDistance(50);
-    setFilterMaxPrice(200);
-    setSortBy('distance');
-    applyFilters();
   };
   
   // Assign a developer to the service request
   const assignDeveloper = async (developerId: string) => {
     try {
-      // Check if user is logged in
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        toast.error('Please log in to assign a developer');
-        navigate('/login');
-        return;
+      console.log('Assigning developer', developerId, 'to service request', serviceRequestId);
+      
+      // First verify the service request exists
+      const { data: checkRequest, error: checkError } = await supabase
+        .from('service_requests')
+        .select('*')
+        .eq('id', serviceRequestId)
+        .single();
+        
+      if (checkError) {
+        console.error('Error checking service request:', checkError);
+        throw new Error(`Service request ${serviceRequestId} not found`);
       }
       
-      // Update the service request with the selected developer
-      const { error } = await supabase
+      console.log('Found service request to update:', checkRequest);
+      
+      // Update the service request with the matched developer - use upsert to ensure it works
+      const updateData = {
+        id: serviceRequestId,
+        matched_developer_id: developerId,
+        status: 'assigned'
+      };
+      
+      const { data: updatedData, error: updateError } = await supabase
         .from('service_requests')
-        .update({
-          matched_developer_id: developerId,
-          status: 'assigned'
-        })
+        .upsert(updateData)
+        .select();
+        
+      if (updateError) {
+        console.error('Error updating service request:', updateError);
+        throw updateError;
+      }
+      
+      // As a backup, do a direct update as well
+      const { data: directUpdate, error: directError } = await supabase
+        .from('service_requests')
+        .update({ matched_developer_id: developerId, status: 'assigned' })
         .eq('id', serviceRequestId);
       
-      if (error) throw error;
+      // Verify the update worked correctly
+      const { data: verifyData } = await supabase
+        .from('service_requests')
+        .select('*')
+        .eq('id', serviceRequestId)
+        .single();
       
-      // Show success message
-      toast.success('Developer assigned successfully! Waiting for developer to accept.');
+      console.log('Final service request state:', verifyData);
+      console.log('New status:', verifyData?.status);
+      console.log('Assigned developer ID:', verifyData?.matched_developer_id);
       
-      // Navigate to service details page (this will need to be created)
-      navigate(`/service/${serviceRequestId}`);
+      toast.success('Developer assigned successfully!');
+      
+      // Navigate to success page
+      navigate(`/request-success/${serviceRequestId}`);
     } catch (error) {
       console.error('Error assigning developer:', error);
       toast.error('Failed to assign developer');
@@ -212,37 +218,39 @@ const DeveloperSelection: React.FC<DeveloperSelectionProps> = ({ requestId }) =>
   // Render a developer card
   const renderDeveloperCard = (developer: Developer) => {
     return (
-      <Card key={developer.id} className="bg-white border-4 border-black p-5 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] hover:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] hover:translate-y-[-2px] hover:translate-x-[-2px] transition-all">
-        <div className="flex flex-col md:flex-row gap-4">
-          {/* Developer profile picture */}
-          <div className="w-20 h-20 overflow-hidden border-4 border-black rounded-full shadow-[4px_4px_0px_0px_rgba(0,0,0,0.7)] bg-yellow-300">
-            {developer.profile_image_url ? (
-              <img 
-                src={developer.profile_image_url} 
-                alt={`${developer.first_name} ${developer.last_name}`} 
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center bg-yellow-300 text-black font-bold text-xl">
-                {developer.first_name[0] + (developer.last_name ? developer.last_name[0] : '')}
-              </div>
-            )}
+      <Card key={developer.id} className="bg-white border-4 border-black shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] hover:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] transition-all overflow-hidden">
+        <div className="flex flex-col md:flex-row">
+          {/* Developer image */}
+          <div className="w-full md:w-1/4 bg-gray-100 border-r-4 border-black">
+            <div className="aspect-square relative">
+              {developer.profile_image_url ? (
+                <img 
+                  src={developer.profile_image_url} 
+                  alt={`${developer.first_name} ${developer.last_name}`}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center bg-yellow-400 text-black font-bold text-4xl">
+                  {developer.first_name.charAt(0)}{developer.last_name.charAt(0)}
+                </div>
+              )}
+            </div>
           </div>
           
           {/* Developer info */}
-          <div className="flex-1">
-            <div className="flex flex-col md:flex-row justify-between">
-              <h3 className="text-xl font-black mb-1">{`${developer.first_name} ${developer.last_name}`}</h3>
-              <div className="flex items-center mb-2 md:mb-0">
-                <div className="bg-black text-white px-3 py-1 rounded-full font-bold text-sm">
-                  ${developer.hourly_rate}/hr
-                </div>
-              </div>
-            </div>
+          <div className="p-4 w-full md:w-3/4">
+            <h3 className="text-xl font-bold mb-1">{developer.first_name} {developer.last_name}</h3>
             
-            <div className="flex items-center mb-2">
+            {/* Rating and price */}
+            <div className="flex items-center mb-3">
               <div className="flex items-center">
-                {[1, 2, 3, 4, 5].map((star) => (
+                <span className="font-bold mr-1">${developer.hourly_rate}/hr</span>
+              </div>
+              
+              <div className="mx-2">•</div>
+              
+              <div className="flex items-center">
+                {[1, 2, 3, 4, 5].map(star => (
                   <Star 
                     key={star} 
                     size={16} 
@@ -260,23 +268,11 @@ const DeveloperSelection: React.FC<DeveloperSelectionProps> = ({ requestId }) =>
               )}
             </div>
             
-            {/* Skills */}
-            <div className="flex flex-wrap gap-1 mb-2">
-              {developer.skills?.slice(0, 3).map((skill, index) => (
-                <Badge key={index} className="bg-yellow-400 text-black border-2 border-black hover:bg-yellow-500">
-                  {skill}
-                </Badge>
-              ))}
-              {developer.skills?.length > 3 && (
-                <Badge className="bg-gray-200 text-black border-2 border-black">
-                  +{developer.skills.length - 3} more
-                </Badge>
-              )}
-            </div>
+            {/* No skills shown - simplified matching */}
             
             {/* Bio (truncated) */}
             <p className="text-sm text-gray-700 line-clamp-2 mb-3">
-              {developer.bio || 'No bio available'}
+              {developer.bio}
             </p>
             
             {/* Assign button */}
@@ -292,104 +288,7 @@ const DeveloperSelection: React.FC<DeveloperSelectionProps> = ({ requestId }) =>
     );
   };
   
-  // Filter section component
-  const FiltersSection = () => (
-    <div className="bg-white border-4 border-black p-4 mb-6 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]">
-      <div className="flex justify-between items-center mb-4">
-        <h3 className="font-bold text-lg">Filters & Sorting</h3>
-        <Button 
-          variant="ghost" 
-          size="sm" 
-          onClick={resetFilters}
-          className="text-sm hover:bg-yellow-100"
-        >
-          Reset
-        </Button>
-      </div>
-      
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Rating filter */}
-        <div>
-          <label className="font-bold text-sm mb-1 block">Minimum Rating</label>
-          <div className="flex items-center">
-            <input 
-              type="range" 
-              min="0" 
-              max="5" 
-              step="0.5"
-              value={filterMinRating}
-              onChange={(e) => setFilterMinRating(parseFloat(e.target.value))}
-              className="w-full accent-black"
-            />
-            <span className="ml-2 font-bold">{filterMinRating}</span>
-          </div>
-        </div>
-        
-        {/* Distance filter */}
-        <div>
-          <label className="font-bold text-sm mb-1 block">Max Distance (km)</label>
-          <div className="flex items-center">
-            <input 
-              type="range" 
-              min="1" 
-              max="50" 
-              value={filterMaxDistance}
-              onChange={(e) => setFilterMaxDistance(parseInt(e.target.value))}
-              className="w-full accent-black"
-            />
-            <span className="ml-2 font-bold">{filterMaxDistance} km</span>
-          </div>
-        </div>
-        
-        {/* Price filter */}
-        <div>
-          <label className="font-bold text-sm mb-1 block">Max Hourly Rate ($)</label>
-          <div className="flex items-center">
-            <input 
-              type="range" 
-              min="10" 
-              max="200" 
-              step="5"
-              value={filterMaxPrice}
-              onChange={(e) => setFilterMaxPrice(parseInt(e.target.value))}
-              className="w-full accent-black"
-            />
-            <span className="ml-2 font-bold">${filterMaxPrice}</span>
-          </div>
-        </div>
-      </div>
-      
-      {/* Sorting options */}
-      <div className="mt-4">
-        <label className="font-bold text-sm mb-1 block">Sort By</label>
-        <div className="flex space-x-2">
-          <Button 
-            onClick={() => setSortBy('distance')} 
-            className={`px-3 py-1 text-sm ${sortBy === 'distance' ? 'bg-black text-white' : 'bg-gray-200 text-black'} border-2 border-black`}
-          >
-            Closest First
-          </Button>
-          <Button 
-            onClick={() => setSortBy('rating')} 
-            className={`px-3 py-1 text-sm ${sortBy === 'rating' ? 'bg-black text-white' : 'bg-gray-200 text-black'} border-2 border-black`}
-          >
-            Highest Rated
-          </Button>
-          <Button 
-            onClick={() => setSortBy('price')} 
-            className={`px-3 py-1 text-sm ${sortBy === 'price' ? 'bg-black text-white' : 'bg-gray-200 text-black'} border-2 border-black`}
-          >
-            Lowest Price
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-  
-  // Apply filters when filter values change
-  useEffect(() => {
-    applyFilters();
-  }, [filterMinRating, filterMaxDistance, filterMaxPrice, sortBy]);
+  // No filtering or sorting needed - only showing available developers
   
   // Show loading state
   if (loading) {
@@ -416,33 +315,19 @@ const DeveloperSelection: React.FC<DeveloperSelectionProps> = ({ requestId }) =>
         )}
       </div>
       
-      {/* Filter toggle */}
-      <div className="mb-4">
-        <Button 
-          onClick={() => setShowFilters(!showFilters)}
-          className="bg-black text-white font-bold border-3 border-black flex items-center gap-2 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.7)] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,0.7)] hover:translate-y-[2px] hover:translate-x-[2px] transition-all"
-        >
-          {showFilters ? <X size={18} /> : <Filter size={18} />}
-          {showFilters ? 'Hide Filters' : 'Show Filters'}
-        </Button>
-      </div>
-      
-      {/* Filters section */}
-      {showFilters && <FiltersSection />}
-      
       {/* Developer list */}
       <div className="mb-4 text-lg font-bold">
-        Showing {filteredDevelopers.length} available developers
+        Showing {developers.length} available developers
       </div>
       
       <div className="grid gap-6">
-        {filteredDevelopers.length === 0 ? (
+        {developers.length === 0 ? (
           <Card className="bg-white border-4 border-dashed border-black p-8 text-center shadow-[4px_4px_0px_0px_rgba(0,0,0,0.7)]">
             <p className="font-bold text-xl">No developers available</p>
-            <p className="font-medium mt-2">Try adjusting your filters or check back later</p>
+            <p className="font-medium mt-2">Please check back later when developers become available</p>
           </Card>
         ) : (
-          filteredDevelopers.map(developer => renderDeveloperCard(developer))
+          developers.map(developer => renderDeveloperCard(developer))
         )}
       </div>
     </div>

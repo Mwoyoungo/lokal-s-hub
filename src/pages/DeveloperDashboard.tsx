@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { BarChart3, Bell, Calendar, Check, ChevronRight, Clock, Loader2, MapPin, MoreHorizontal, Plus, User, X } from 'lucide-react';
+import { BarChart3, Bell, Calendar, Check, ChevronRight, Clock, Loader2, MapPin, MoreHorizontal, Plus, Play, User, X } from 'lucide-react';
 import DeveloperLayout from '@/components/DeveloperLayout';
 import { cn } from '@/lib/utils';
 import { playNotificationSound, requestNotificationPermission, showBrowserNotification } from '@/utils/notificationSound';
@@ -21,14 +21,16 @@ interface RequestItem {
   description: string;
   budget: number;
   status: string;
+  raw_status?: string; // For debugging
   created_at: string;
+  matched_developer_id?: string;
   client: {
     first_name: string;
     last_name: string;
   }
 }
 
-const DeveloperDashboard: React.FC = () => {
+const DeveloperDashboard = () => {
   const [requests, setRequests] = useState<RequestItem[]>([]);
   const [activeRequests, setActiveRequests] = useState<RequestItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,79 +93,75 @@ const DeveloperDashboard: React.FC = () => {
         }
       });
       
-      // Fetch pending requests (new)
-      const { data: pendingData, error: pendingError } = await supabase
+      // Fetch requests - simplify to get all requests first, then filter in code
+      // This helps avoid potential SQL query issues
+      const { data: allRequestsData, error: allRequestsError } = await supabase
         .from('service_requests')
         .select(
-          `id, service_type, description, budget, status, created_at, \
+          `id, service_type, description, budget, status, created_at, matched_developer_id, \
           client:users!service_requests_client_id_fkey(first_name, last_name)`
         )
-        .eq('status', 'pending')
         .order('created_at', { ascending: false });
       
-      // Fetch active requests (in progress)
-      let activeData = null;
-      let activeError = null;
+      // We now get all requests in one query, so we don't need this second query
       
-      if (userId) {
-        const result = await supabase
-          .from('service_requests')
-          .select(
-            `id, service_type, description, budget, status, created_at, \
-            client:users!service_requests_client_id_fkey(first_name, last_name)`
-          )
-          .eq('status', 'in_progress')
-          .eq('matched_developer_id', userId)
-          .order('created_at', { ascending: false });
+      if (allRequestsError) {
+        toast.error(`Error fetching requests: ${allRequestsError.message}`);
+      }
+      
+      if (allRequestsData) {
+        // Debug: Log all fetched requests
+        console.log('Fetched all requests:', allRequestsData);
+        
+        // Filter and categorize requests
+        const pendingItems: RequestItem[] = [];
+        const activeItems: RequestItem[] = [];
+        
+        allRequestsData.forEach((r: any) => {
+          // Normalize status for comparison
+          const normalizedStatus = (r.status || '').trim().toLowerCase();
+          const client = r.client || { first_name: 'Unknown', last_name: 'Client' };
           
-        activeData = result.data;
-        activeError = result.error;
-      } else {
-        // If userId is null, just use an empty array for active requests
-        activeData = [];
-      }
-      
-      if (pendingError) {
-        toast.error(`Error fetching pending requests: ${pendingError.message}`);
-      }
-      
-      if (activeError) {
-        toast.error(`Error fetching active requests: ${activeError.message}`);
-      }
-      
-      if (pendingData) {
-        // Process pending requests
-        const pendingItems = pendingData.map((r: any) => {
-          const client = r.client || { first_name: 'Unknown', last_name: 'Client' };
-          return {
+          // Create the request item
+          const requestItem: RequestItem = {
             id: r.id,
             service_type: r.service_type,
             description: r.description,
             budget: r.budget,
-            status: r.status,
+            status: normalizedStatus,
+            raw_status: r.status,
             created_at: r.created_at,
+            matched_developer_id: r.matched_developer_id,
             client
           };
+          
+          // Explicitly log each request for debugging
+          console.log(`Request ${r.id}:
+  Status: '${r.status}'
+  Matched Dev: ${r.matched_developer_id}
+  Current Dev: ${userId}`);
+          
+          // Categorize the request
+          if (normalizedStatus === 'pending') {
+            // All pending requests go to the pending list
+            pendingItems.push(requestItem);
+          } else if (normalizedStatus === 'assigned' && r.matched_developer_id === userId) {
+            // Only assigned requests for this developer go to pending list
+            console.log(`  -> Assigned to this developer`);
+            pendingItems.push(requestItem);
+          } else if ((normalizedStatus === 'accepted' || normalizedStatus === 'in_progress') && r.matched_developer_id === userId) {
+            // Active requests for this developer
+            console.log(`  -> Active job for this developer`);
+            activeItems.push(requestItem);
+          }
         });
+        
+        // Update state with categorized requests
         setRequests(pendingItems);
-      }
-      
-      if (activeData) {
-        // Process active requests
-        const activeItems = activeData.map((r: any) => {
-          const client = r.client || { first_name: 'Unknown', last_name: 'Client' };
-          return {
-            id: r.id,
-            service_type: r.service_type,
-            description: r.description,
-            budget: r.budget,
-            status: r.status,
-            created_at: r.created_at,
-            client
-          };
-        });
         setActiveRequests(activeItems);
       }
+      
+      // Remove this block - we're handling active requests above
       
       setLoading(false);
     };
@@ -176,9 +174,10 @@ const DeveloperDashboard: React.FC = () => {
     audioElement.preload = 'auto';
     audioRef.current = audioElement;
     
-    // Set up real-time subscription for new requests
-    const channel = supabase
-      .channel('service_requests_channel')
+    // Set up real-time subscriptions
+    // 1. Subscription for brand new service requests
+    const newRequestsChannel = supabase
+      .channel('new_requests_channel')
       .on('postgres_changes', 
           { event: 'INSERT', schema: 'public', table: 'service_requests', filter: `status=eq.pending` },
           async (payload) => {
@@ -238,8 +237,57 @@ const DeveloperDashboard: React.FC = () => {
           })
       .subscribe();
       
+    // 2. Subscription for request assignment to this developer
+    const assignmentChannel = supabase
+      .channel('assignment_channel')
+      .on('postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'service_requests', filter: `matched_developer_id=eq.${userId}` },
+          async (payload) => {
+            // If the update was to assign this request to the current developer
+            if (payload.new.status === 'assigned' && payload.new.matched_developer_id === userId) {
+              console.log('New job assigned to you:', payload.new);
+              
+              // Play notification sound
+              playNotificationSound();
+              
+              // Refetch data to update the UI
+              await fetchRequests();
+              
+              // Get client name for the notification
+              const { data: clientData } = await supabase
+                .from('users')
+                .select('first_name, last_name')
+                .eq('id', payload.new.client_id)
+                .single();
+                
+              const clientName = clientData ? 
+                `${clientData.first_name} ${clientData.last_name}` : 
+                'A client';
+                
+              // Show toast notification
+              toast('New service request assigned to you!', {
+                icon: <Bell className="h-5 w-5 text-yellow-500" />,
+                description: `${clientName} has selected you for a job`,
+                duration: 5000,
+              });
+              
+              // Show browser notification if enabled
+              if (notificationsEnabled) {
+                showBrowserNotification('LOKAL-S: New Assignment', {
+                  body: `A client has assigned a new service request to you!`,
+                  tag: 'new-assignment',
+                });
+              }
+              
+              // Highlight the "new" tab
+              setActiveTab('new');
+            }
+          })
+      .subscribe();
+
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(newRequestsChannel);
+      supabase.removeChannel(assignmentChannel);
     };
   }, [navigate]);
 
@@ -293,7 +341,13 @@ const DeveloperDashboard: React.FC = () => {
     
     // build update payload
     const updates: any = { status: newStatus };
-    if (newStatus === 'in_progress') updates.matched_developer_id = devId;
+    
+    // Keep the matched_developer_id for all states except 'rejected'
+    if (newStatus !== 'rejected') {
+      // For 'pending' we don't set the matched_developer_id, it will be set when assigned
+      // But for 'accepted', 'in_progress', and 'completed' we keep it
+      updates.matched_developer_id = devId;
+    }
     
     const { error } = await supabase
       .from('service_requests')
@@ -303,29 +357,43 @@ const DeveloperDashboard: React.FC = () => {
     if (error) {
       toast.error(`Error: ${error.message}`);
     } else {
-      if (newStatus === 'in_progress') {
+      // Handle different status transitions with appropriate messages
+      if (newStatus === 'accepted') {
         toast.success('Request accepted!', {
-          description: 'You can now start working on this request',
+          description: 'You have accepted this assignment',
           icon: <Check className="h-5 w-5 text-green-500" />
         });
         
-        // Move request from pending to active
+        // Move request from new to active
         const acceptedRequest = requests.find(r => r.id === id);
         if (acceptedRequest) {
-          setActiveRequests(prev => [acceptedRequest, ...prev]);
+          const updatedRequest = {...acceptedRequest, status: 'accepted'};
+          setActiveRequests(prev => [updatedRequest, ...prev]);
         }
+      } else if (newStatus === 'in_progress') {
+        toast.success('Started working on request!', {
+          description: 'You have marked this request as in progress',
+          icon: <Check className="h-5 w-5 text-green-500" />
+        });
+        
+        // Update the status in the active requests list
+        setActiveRequests(prev => prev.map(r => 
+          r.id === id ? {...r, status: 'in_progress'} : r
+        ));
       } else if (newStatus === 'rejected') {
         toast.success('Request rejected', {
+          description: 'You will not be assigned to this request',
           icon: <X className="h-5 w-5 text-red-500" />
         });
       } else if (newStatus === 'completed') {
         toast.success('Request marked as completed!', {
+          description: 'Great job! The client will be notified.',
           icon: <Check className="h-5 w-5 text-green-500" />
         });
       }
       
       // Remove from appropriate list
-      if (newStatus === 'in_progress') {
+      if (newStatus === 'accepted' || newStatus === 'in_progress') {
         setRequests(prev => prev.filter(r => r.id !== id));
       } else if (newStatus === 'rejected') {
         setRequests(prev => prev.filter(r => r.id !== id));
@@ -345,84 +413,32 @@ const DeveloperDashboard: React.FC = () => {
     });
   };
 
+    // Helper functions for request status display
+  const getStatusDisplayName = (status: string): string => {
+    switch(status) {
+      case 'pending': return 'Pending';
+      case 'assigned': return 'Assigned';
+      case 'accepted': return 'Accepted';
+      case 'in_progress': return 'In Progress';
+      case 'completed': return 'Completed';
+      case 'rejected': return 'Rejected';
+      default: return status;
+    }
+  };
+
+  const getStatusBadgeColor = (status: string): string => {
+    switch(status) {
+      case 'pending': return 'bg-gray-200';
+      case 'assigned': return 'bg-yellow-200';
+      case 'accepted': return 'bg-blue-200';
+      case 'in_progress': return 'bg-green-200';
+      case 'completed': return 'bg-purple-200';
+      case 'rejected': return 'bg-red-200';
+      default: return 'bg-gray-200';
+    }
+  };
+  
   // Render task card - neobrutalism style
-  const renderTaskCard = (request: RequestItem, isActive: boolean) => (
-    <Card className="bg-white border-4 border-black overflow-hidden shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] hover:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] hover:translate-y-[-2px] hover:translate-x-[-2px] transition-all">
-      {/* Colored header based on status */}
-      <div className={`p-4 border-b-4 border-black ${isActive ? 'bg-green-400' : 'bg-yellow-400'}`}>
-        <div className="flex justify-between items-center">
-          <h3 className="font-black text-lg tracking-tight">{request.service_type}</h3>
-          <Badge className="bg-black text-white font-bold px-3 py-1 text-sm">
-            ${request.budget}
-          </Badge>
-        </div>
-      </div>
-      
-      <div className="p-4">
-        {/* Task description */}
-        <p className="font-medium mb-4">{request.description}</p>
-        
-        {/* Task meta information */}
-        <div className="grid grid-cols-2 gap-4 mb-4">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-blue-300 border-2 border-black flex items-center justify-center">
-              <User size={16} className="text-black" />
-            </div>
-            <span className="font-bold text-sm">{request.client.first_name} {request.client.last_name}</span>
-          </div>
-          
-          <div className="flex items-center gap-2 text-sm font-medium">
-            <div className="w-8 h-8 bg-purple-300 border-2 border-black flex items-center justify-center">
-              <Clock size={16} className="text-black" />
-            </div>
-            <span>{formatDate(request.created_at)}</span>
-          </div>
-        </div>
-        
-        {/* Action buttons */}
-        <div className="flex gap-3 mt-4 pt-4 border-t-2 border-gray-200">
-          {isActive ? (
-            <Button 
-              onClick={() => handleAction(request.id, 'completed')}
-              className="flex-1 bg-green-500 hover:bg-green-600 text-black font-bold border-3 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.7)] hover:shadow-[5px_5px_0px_0px_rgba(0,0,0,0.7)] hover:translate-y-[-2px] hover:translate-x-[-2px] transition-all"
-            >
-              <Check size={18} className="mr-2" /> Mark Complete
-            </Button>
-          ) : (
-            <>
-              <Button 
-                onClick={() => handleAction(request.id, 'in_progress')}
-                className="flex-1 bg-green-500 hover:bg-green-600 text-black font-bold border-3 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.7)] hover:shadow-[5px_5px_0px_0px_rgba(0,0,0,0.7)] hover:translate-y-[-2px] hover:translate-x-[-2px] transition-all"
-              >
-                Accept
-              </Button>
-              <Button 
-                onClick={() => handleAction(request.id, 'rejected')}
-                variant="outline"
-                className="flex-1 bg-white hover:bg-gray-100 text-black font-bold border-3 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.7)] hover:shadow-[5px_5px_0px_0px_rgba(0,0,0,0.7)] hover:translate-y-[-2px] hover:translate-x-[-2px] transition-all"
-              >
-                Reject
-              </Button>
-            </>
-          )}
-        </div>
-      </div>
-    </Card>
-  );
-
-  if (loading) {
-    return (
-      <DeveloperLayout>
-        <div className="min-h-screen bg-[#FFD700] flex items-center justify-center">
-          <div className="bg-white border-4 border-black p-8 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] flex flex-col items-center">
-            <Loader2 className="h-12 w-12 animate-spin text-black mb-4" />
-            <p className="text-xl font-black">Loading Dashboard...</p>
-          </div>
-        </div>
-      </DeveloperLayout>
-    );
-  }
-
   // Handle location picker open/close
   const toggleLocationPicker = () => setShowLocationPicker(!showLocationPicker);
   
@@ -496,6 +512,133 @@ const DeveloperDashboard: React.FC = () => {
       </div>
     );
   };
+
+  const renderTaskCard = (request: RequestItem, isActive: boolean) => {
+    // Debug output for request status
+    console.log(`Rendering card for request ${request.id} with status: ${request.status}`);
+    
+    // Determine background color based on status
+    let statusBgColor = 'bg-white';
+    if (request.status === 'assigned') statusBgColor = 'bg-yellow-50';
+    if (request.status === 'accepted') statusBgColor = 'bg-blue-50';
+    if (request.status === 'in_progress') statusBgColor = 'bg-green-50';
+    
+    return (
+      <Card key={request.id} className={`${statusBgColor} border-4 border-black overflow-hidden shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] hover:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] hover:translate-y-[-2px] hover:translate-x-[-2px] transition-all`}>
+      {/* Colored header based on status */}
+      <div className={`p-4 border-b-4 border-black ${isActive ? 'bg-green-400' : 'bg-yellow-400'}`}>
+        <div className="flex justify-between items-center">
+          <h3 className="font-black text-lg tracking-tight">{request.service_type}</h3>
+          <Badge className="bg-black text-white font-bold px-3 py-1 text-sm">
+            ${request.budget}
+          </Badge>
+        </div>
+      </div>
+      
+      <div className="p-4">
+        {/* Task description */}
+        <p className="font-medium mb-4">{request.description}</p>
+        
+        {/* Task meta information */}
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-blue-300 border-2 border-black flex items-center justify-center">
+              <User size={16} className="text-black" />
+            </div>
+            <span className="font-bold text-sm">{request.client.first_name} {request.client.last_name}</span>
+          </div>
+          
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <div className="w-8 h-8 bg-purple-300 border-2 border-black flex items-center justify-center">
+              <Clock size={16} className="text-black" />
+            </div>
+            <span>{formatDate(request.created_at)}</span>
+          </div>
+        </div>
+        
+        {/* Action buttons */}
+        <div className="flex gap-3 mt-4 pt-4 border-t-2 border-gray-200">
+          {/* Show status badge */}
+          <Badge className={`px-3 py-1 text-black font-bold border-2 border-black ${getStatusBadgeColor(request.status)}`}>
+            {getStatusDisplayName(request.status)}
+          </Badge>
+
+          {/* For Active requests (already accepted or in progress) */}
+          {isActive && (
+            <>
+              {request.status === 'accepted' && (
+                <Button 
+                  onClick={() => handleAction(request.id, 'in_progress')}
+                  className="flex-1 bg-blue-500 hover:bg-blue-600 text-black font-bold border-3 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.7)] hover:shadow-[5px_5px_0px_0px_rgba(0,0,0,0.7)] hover:translate-y-[-2px] hover:translate-x-[-2px] transition-all"
+                >
+                  <Play size={18} className="mr-2" /> Start Work
+                </Button>
+              )}
+              
+              {request.status === 'in_progress' && (
+                <Button 
+                  onClick={() => handleAction(request.id, 'completed')}
+                  className="flex-1 bg-green-500 hover:bg-green-600 text-black font-bold border-3 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.7)] hover:shadow-[5px_5px_0px_0px_rgba(0,0,0,0.7)] hover:translate-y-[-2px] hover:translate-x-[-2px] transition-all"
+                >
+                  <Check size={18} className="mr-2" /> Mark Complete
+                </Button>
+              )}
+            </>
+          )}
+
+          {/* For New requests (pending or assigned) */}
+          {!isActive && (
+            <>
+              {/* For assigned requests, show accept/reject buttons */}
+              {/* Show accept/reject buttons if request is assigned to this developer */}
+              {(request.status === 'assigned' || request.raw_status === 'assigned') && request.matched_developer_id === userId && (
+                <>
+                  <Button 
+                    onClick={() => handleAction(request.id, 'accepted')}
+                    className="flex-1 bg-green-500 hover:bg-green-600 text-black font-bold border-3 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.7)] hover:shadow-[5px_5px_0px_0px_rgba(0,0,0,0.7)] hover:translate-y-[-2px] hover:translate-x-[-2px] transition-all"
+                  >
+                    <Check size={18} className="mr-2" /> Accept
+                  </Button>
+                  <Button 
+                    onClick={() => handleAction(request.id, 'rejected')}
+                    variant="outline"
+                    className="flex-1 bg-white hover:bg-gray-100 text-black font-bold border-3 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.7)] hover:shadow-[5px_5px_0px_0px_rgba(0,0,0,0.7)] hover:translate-y-[-2px] hover:translate-x-[-2px] transition-all"
+                  >
+                    <X size={18} className="mr-2" /> Reject
+                  </Button>
+                </>
+              )}
+              
+              {/* For pending requests, show view only or disabled button */}
+              {(request.status === 'pending' || request.raw_status === 'pending') && (
+                <Button
+                  variant="outline"
+                  className="flex-1 bg-white hover:bg-gray-100 text-black font-bold border-3 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.7)] hover:shadow-[5px_5px_0px_0px_rgba(0,0,0,0.7)] hover:translate-y-[-2px] hover:translate-x-[-2px] transition-all"
+                  disabled
+                >
+                  <Clock size={18} className="mr-2" /> Awaiting Assignment
+                </Button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </Card>
+    );
+  };
+
+  if (loading) {
+    return (
+      <DeveloperLayout>
+        <div className="min-h-screen bg-[#FFD700] flex items-center justify-center">
+          <div className="bg-white border-4 border-black p-8 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] flex flex-col items-center">
+            <Loader2 className="h-12 w-12 animate-spin text-black mb-4" />
+            <p className="text-xl font-black">Loading Dashboard...</p>
+          </div>
+        </div>
+      </DeveloperLayout>
+    );
+  }
 
   return (
     <DeveloperLayout>
